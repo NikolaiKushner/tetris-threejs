@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <title>Tetris Three.js</title>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body {
+        background: #0a0a1a;
+        overflow: hidden;
+        font-family: 'Courier New', monospace;
+        color: #fff;
+        -webkit-user-select: none;
+        user-select: none;
+      }
+      #app {
+        width: 100vw;
+        height: 100vh;
+        position: relative;
+        touch-action: none;
+      }
+      canvas { display: block; }
+
+      /* ── HUD ── */
+      #hud {
+        position: absolute;
+        top: 0; left: 0; right: 0; bottom: 0;
+        pointer-events: none;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+      }
+
+      #hud-right {
+        position: absolute;
+        right: calc(50% - 320px);
+        top: 50%;
+        transform: translateY(-50%);
+        text-align: left;
+        text-shadow: 0 0 10px rgba(255,255,255,0.5);
+      }
+
+      #hud-right .label {
+        font-size: 12px;
+        color: #888;
+        text-transform: uppercase;
+        letter-spacing: 2px;
+        margin-bottom: 2px;
+      }
+
+      #hud-right .value {
+        font-size: 24px;
+        margin-bottom: 16px;
+        color: #fff;
+        text-shadow: 0 0 15px rgba(0,255,255,0.6);
+      }
+
+      #next-preview {
+        width: 100px;
+        height: 80px;
+        margin-bottom: 16px;
+      }
+
+      /* ── Overlay ── */
+      #overlay {
+        position: absolute;
+        top: 0; left: 0; right: 0; bottom: 0;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        background: rgba(10, 10, 26, 0.85);
+        pointer-events: auto;
+        z-index: 10;
+      }
+
+      #overlay.hidden { display: none; }
+
+      #overlay h1 {
+        font-size: 48px;
+        text-shadow: 0 0 30px #ff00ff, 0 0 60px #ff00ff;
+        color: #ff00ff;
+        margin-bottom: 20px;
+      }
+
+      #overlay .subtitle {
+        font-size: 16px;
+        color: #00ffff;
+        text-shadow: 0 0 15px #00ffff;
+        animation: pulse 1.5s ease-in-out infinite;
+      }
+
+      #overlay .score-display {
+        font-size: 32px;
+        color: #ffff00;
+        text-shadow: 0 0 20px #ffff00;
+        margin-bottom: 10px;
+      }
+
+      #overlay .best-score {
+        font-size: 18px;
+        color: #00ff88;
+        text-shadow: 0 0 12px #00ff88;
+        margin-bottom: 16px;
+      }
+
+      #overlay .history-table {
+        margin-top: 12px;
+        font-size: 13px;
+        color: #aaa;
+        text-align: left;
+      }
+
+      #overlay .history-table .header {
+        color: #888;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+      }
+
+      #overlay .history-table .row {
+        margin-top: 4px;
+      }
+
+      #overlay .history-table .rank {
+        color: #ff00ff;
+        display: inline-block;
+        width: 24px;
+      }
+
+      @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.4; }
+      }
+
+      /* ── Touch Controls ── */
+      #touch-controls {
+        display: none;
+        position: fixed;
+        bottom: 0;
+        left: 0; right: 0;
+        padding: 12px 16px;
+        padding-bottom: max(12px, env(safe-area-inset-bottom));
+        z-index: 20;
+        pointer-events: auto;
+        justify-content: space-between;
+        align-items: flex-end;
+      }
+
+      .touch-group {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .touch-row {
+        display: flex;
+        gap: 10px;
+      }
+
+      .touch-btn {
+        width: 56px;
+        height: 56px;
+        border-radius: 50%;
+        border: 2px solid rgba(100, 100, 200, 0.5);
+        background: rgba(20, 20, 50, 0.6);
+        color: #aaccff;
+        font-size: 22px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        -webkit-tap-highlight-color: transparent;
+        transition: background 0.1s, border-color 0.1s;
+      }
+
+      .touch-btn:active {
+        background: rgba(80, 80, 180, 0.4);
+        border-color: #00ffff;
+        box-shadow: 0 0 15px rgba(0, 255, 255, 0.3);
+      }
+
+      .touch-btn.small {
+        width: 44px;
+        height: 44px;
+        font-size: 16px;
+      }
+
+      /* Show touch controls on touch devices */
+      @media (pointer: coarse) {
+        #touch-controls { display: flex; }
+      }
+
+      /* Mobile HUD adjustments */
+      @media (max-width: 700px) {
+        #hud-right {
+          right: 8px;
+          top: 8px;
+          transform: none;
+          text-align: right;
+        }
+        #hud-right .value { font-size: 18px; margin-bottom: 8px; }
+        #hud-right .label { font-size: 10px; }
+        #next-preview { width: 60px; height: 50px; margin-bottom: 8px; }
+        #overlay h1 { font-size: 32px; }
+        #overlay .score-display { font-size: 24px; }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <div id="hud">
+        <div id="hud-right">
+          <div class="label">Next</div>
+          <canvas id="next-preview"></canvas>
+          <div class="label">Score</div>
+          <div class="value" id="score">0</div>
+          <div class="label">Level</div>
+          <div class="value" id="level">1</div>
+          <div class="label">Lines</div>
+          <div class="value" id="lines">0</div>
+        </div>
+      </div>
+      <div id="overlay">
+        <h1>MR. TET</h1>
+        <div class="subtitle">Press ENTER to play</div>
+      </div>
+
+      <!-- Touch controls (hidden on desktop) -->
+      <div id="touch-controls">
+        <div class="touch-group">
+          <div class="touch-row">
+            <button class="touch-btn small" id="btn-rotate-ccw">↺</button>
+          </div>
+          <div class="touch-row">
+            <button class="touch-btn" id="btn-left">◀</button>
+            <button class="touch-btn" id="btn-right">▶</button>
+          </div>
+        </div>
+        <div class="touch-group">
+          <button class="touch-btn small" id="btn-pause">⏸</button>
+        </div>
+        <div class="touch-group">
+          <div class="touch-row">
+            <button class="touch-btn small" id="btn-rotate-cw">↻</button>
+          </div>
+          <div class="touch-row">
+            <button class="touch-btn" id="btn-soft-drop">▼</button>
+            <button class="touch-btn" id="btn-hard-drop">⏬</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
