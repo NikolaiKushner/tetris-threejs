@@ -23,6 +23,7 @@ export class TouchHandler {
     this.onStart = onStart;
     this.setupButtons();
     this.setupSwipeGestures();
+    this.setupOverlayTap();
   }
 
   update(dt: number): void {
@@ -130,6 +131,20 @@ export class TouchHandler {
     this.heldDir = null;
     this.dasTimer = 0;
     this.dasActive = false;
+  }
+
+  private setupOverlayTap(): void {
+    const overlay = document.getElementById('overlay');
+    if (!overlay) return;
+
+    overlay.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      if (this.game.state === 'idle' || this.game.state === 'gameover') {
+        this.onStart();
+      } else if (this.game.state === 'paused') {
+        this.game.togglePause();
+      }
+    });
   }
 
   private setupSwipeGestures(): void {
