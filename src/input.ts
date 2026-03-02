@@ -90,6 +90,12 @@ export class InputHandler {
         this.game.rotateCCW();
         e.preventDefault();
         break;
+      case 'c':
+      case 'C':
+      case 'Shift':
+        this.game.hold();
+        e.preventDefault();
+        break;
       case ' ':
         this.game.hardDrop();
         e.preventDefault();

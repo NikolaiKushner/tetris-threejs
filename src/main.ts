@@ -21,13 +21,25 @@ const startGame = () => {
 const input = new InputHandler(game, startGame);
 const touch = new TouchHandler(game, startGame);
 
-// Sound callbacks
+// Sound + visual callbacks
 game.onMove = () => sound.move();
 game.onRotate = () => sound.rotate();
 game.onLock = () => sound.lock();
+game.onHold = () => sound.hold();
 game.onHardDrop = () => sound.hardDrop();
-game.onLineClear = (count) => sound.lineClear(count);
-game.onLevelUp = () => sound.levelUp();
+
+game.onLineClear = (count, score) => {
+  sound.lineClear(count);
+  hud.showClearPopup(count, score);
+  // Shake intensity scales with lines cleared (world units; viewH ≈ 26 units = ~1080px)
+  const shakeIntensity = [0, 0.30, 0.55, 0.85, 1.4][count] ?? 0.30;
+  renderer.triggerShake(shakeIntensity);
+};
+
+game.onLevelUp = () => {
+  sound.levelUp();
+  hud.showLevelUpPopup();
+};
 
 // Save score when game ends
 game.onGameOver = () => {

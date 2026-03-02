@@ -84,6 +84,10 @@ export class TouchHandler {
       }
     });
 
+    this.bindButton('btn-hold', () => {
+      this.game.hold();
+    });
+
     // Pause button
     this.bindButton('btn-pause', () => {
       if (this.game.state === 'playing' || this.game.state === 'paused') {

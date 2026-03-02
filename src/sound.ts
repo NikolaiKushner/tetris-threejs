@@ -53,6 +53,11 @@ export class SoundEngine {
     this.tone(60, 0.14, 'sawtooth', 0.15);
   }
 
+  hold(): void {
+    this.tone(440, 0.04, 'square', 0.12);
+    this.tone(330, 0.06, 'square', 0.10, undefined, 0.03);
+  }
+
   hardDrop(): void {
     this.tone(140, 0.09, 'square', 0.28, 50);
   }

@@ -4,7 +4,7 @@ A neon-styled Tetris clone built with Three.js and TypeScript. Features glowing 
 
 **[Play Now](https://nikolaikushner.github.io/tetris-threejs/)**
 
-![Screenshot](screenshot.png)
+![Screenshot](screenshot.jpg)
 
 ## Play Locally
 

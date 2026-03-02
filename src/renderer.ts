@@ -30,6 +30,14 @@ export class Renderer {
 
   private blockGeo: THREE.BoxGeometry;
 
+  // Camera base position (center of board)
+  private camCX = 0;
+  private camCY = 0;
+
+  // Screen shake
+  private shakeAmount = 0;
+  private lastRenderMs = 0;
+
   constructor(container: HTMLElement) {
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x0a0a1a);
@@ -46,8 +54,10 @@ export class Renderer {
       viewH / 2, -viewH / 2,
       0.1, 100,
     );
-    this.camera.position.set(boardW / 2 - 0.5, boardH / 2 - 0.5, 20);
-    this.camera.lookAt(boardW / 2 - 0.5, boardH / 2 - 0.5, 0);
+    this.camCX = boardW / 2 - 0.5;
+    this.camCY = boardH / 2 - 0.5;
+    this.camera.position.set(this.camCX, this.camCY, 20);
+    this.camera.lookAt(this.camCX, this.camCY, 0);
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
@@ -175,7 +185,25 @@ export class Renderer {
     return new THREE.LineSegments(geo, mat);
   }
 
+  triggerShake(intensity: number): void {
+    this.shakeAmount = Math.max(this.shakeAmount, intensity);
+  }
+
   render(game: Game): void {
+    // Screen shake — decay exponentially with time
+    const now = performance.now();
+    const dtSec = this.lastRenderMs ? (now - this.lastRenderMs) / 1000 : 0;
+    this.lastRenderMs = now;
+
+    if (this.shakeAmount > 0.001) {
+      const sx = (Math.random() * 2 - 1) * this.shakeAmount;
+      const sy = (Math.random() * 2 - 1) * this.shakeAmount * 0.6;
+      this.camera.position.set(this.camCX + sx, this.camCY + sy, 20);
+      this.shakeAmount *= Math.exp(-9 * dtSec); // ~0.6s total visible duration
+    } else {
+      this.shakeAmount = 0;
+      this.camera.position.set(this.camCX, this.camCY, 20);
+    }
     // Line-clear animation state
     const isClearing = game.clearingRows.length > 0;
     const clearProgress = isClearing ? 1 - game.clearTimer / CLEAR_DURATION : 0;

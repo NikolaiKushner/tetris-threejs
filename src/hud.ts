@@ -8,10 +8,14 @@ export class HUD {
   private linesEl: HTMLElement;
   private overlay: HTMLElement;
   private nextCanvas: HTMLCanvasElement;
+  private holdCanvas: HTMLCanvasElement;
+  private popupsEl: HTMLElement;
   private renderer: Renderer;
   private scores: ScoreHistory;
 
   private lastNextPiece = -1;
+  private lastHoldPiece: number = -1; // -1 = never rendered
+  private lastCanHold = true;
   private lastState = '';
 
   constructor(renderer: Renderer, scores: ScoreHistory) {
@@ -20,6 +24,8 @@ export class HUD {
     this.linesEl = document.getElementById('lines')!;
     this.overlay = document.getElementById('overlay')!;
     this.nextCanvas = document.getElementById('next-preview') as HTMLCanvasElement;
+    this.holdCanvas = document.getElementById('hold-preview') as HTMLCanvasElement;
+    this.popupsEl = document.getElementById('popups')!;
     this.renderer = renderer;
     this.scores = scores;
   }
@@ -29,15 +35,41 @@ export class HUD {
     this.levelEl.textContent = String(game.level);
     this.linesEl.textContent = String(game.lines);
 
-    // Update next piece preview only when it changes
+    // Next piece preview
     if (game.nextPiece !== this.lastNextPiece) {
       this.lastNextPiece = game.nextPiece;
       this.renderer.renderNextPreview(game.nextPiece, this.nextCanvas);
     }
 
-    // Overlay management — only update DOM when state changes
+    // Hold piece preview — re-render when piece changes
+    if ((game.holdPiece as number | null) !== this.lastHoldPiece) {
+      this.lastHoldPiece = game.holdPiece as number | null as number;
+      if (game.holdPiece === null) {
+        const ctx = this.holdCanvas.getContext('2d');
+        if (ctx) ctx.clearRect(0, 0, this.holdCanvas.width, this.holdCanvas.height);
+        this.holdCanvas.width = 80; // reset canvas (clears it)
+      } else {
+        this.renderer.renderNextPreview(game.holdPiece, this.holdCanvas);
+      }
+    }
+
+    // Dim hold canvas when hold is locked for this piece
+    if (game.canHold !== this.lastCanHold) {
+      this.lastCanHold = game.canHold;
+      this.holdCanvas.style.opacity = game.canHold ? '1' : '0.3';
+    }
+
+    // Overlay — only update DOM when state changes
     if (game.state !== this.lastState) {
       this.lastState = game.state;
+      // Reset hold preview tracking so it re-renders on next game start
+      if (game.state === 'idle' || game.state === 'gameover') {
+        this.lastHoldPiece = -1;
+        this.lastNextPiece = -1;
+        this.lastCanHold = true;
+        this.holdCanvas.style.opacity = '1';
+      }
+
       const best = this.scores.getBest();
       const bestHtml = best
         ? `<div class="best-score">Best: ${best.score.toLocaleString()}</div>`
@@ -77,6 +109,39 @@ export class HUD {
           break;
       }
     }
+  }
+
+  showClearPopup(count: number, score: number): void {
+    const labels  = ['', '', 'DOUBLE!', 'TRIPLE!', 'TETRIS!'];
+    const colors  = ['', '#ffffff', '#00ffff', '#ff00ff', '#ffff00'];
+    const sizes   = ['', '1.1rem',  '1.3rem',  '1.5rem',  '2.2rem'];
+    const shadows = ['', '8px',     '12px',    '16px',    '24px'];
+
+    const label  = count >= 2 ? labels[count]  ?? 'CLEAR!' : '';
+    const color  = colors[count]  ?? '#fff';
+    const size   = sizes[count]   ?? '1.1rem';
+    const blur   = shadows[count] ?? '8px';
+
+    const text = label
+      ? `${label}  +${score.toLocaleString()}`
+      : `+${score.toLocaleString()}`;
+
+    this.spawnPopup(text, color, size, blur);
+  }
+
+  showLevelUpPopup(): void {
+    this.spawnPopup('LEVEL UP!', '#ff8800', '1.6rem', '18px');
+  }
+
+  private spawnPopup(text: string, color: string, fontSize: string, glowBlur: string): void {
+    const el = document.createElement('div');
+    el.className = 'popup';
+    el.style.color = color;
+    el.style.fontSize = fontSize;
+    el.style.textShadow = `0 0 ${glowBlur} ${color}, 0 0 calc(${glowBlur} * 2) ${color}`;
+    el.textContent = text;
+    this.popupsEl.appendChild(el);
+    el.addEventListener('animationend', () => el.remove(), { once: true });
   }
 
   private renderHistory(): string {
