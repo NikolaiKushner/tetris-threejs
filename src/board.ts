@@ -49,6 +49,14 @@ export function lockPiece(
   }
 }
 
+export function findFullRows(grid: Grid): number[] {
+  const rows: number[] = [];
+  for (let row = 0; row < ROWS; row++) {
+    if (grid[row].every(cell => cell !== 0)) rows.push(row);
+  }
+  return rows;
+}
+
 export function clearLines(grid: Grid): number {
   let linesCleared = 0;
   for (let row = ROWS - 1; row >= 0; row--) {

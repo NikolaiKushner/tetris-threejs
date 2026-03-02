@@ -3,7 +3,7 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { COLS, ROWS, PIECE_COLORS } from './constants';
-import { Game } from './game';
+import { Game, CLEAR_DURATION } from './game';
 import { getShape } from './tetromino';
 import type { PieceType } from './tetromino';
 
@@ -26,6 +26,7 @@ export class Renderer {
   // Materials cache (one per piece type)
   private materials: THREE.MeshStandardMaterial[] = [];
   private ghostMaterials: THREE.MeshStandardMaterial[] = [];
+  private clearMaterial: THREE.MeshStandardMaterial;
 
   private blockGeo: THREE.BoxGeometry;
 
@@ -97,6 +98,15 @@ export class Renderer {
       }));
     }
 
+    // Material for line-clear animation (bright white flash)
+    this.clearMaterial = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      emissive: 0xffffff,
+      emissiveIntensity: 1.5,
+      roughness: 0.1,
+      metalness: 0.1,
+    });
+
     // Board mesh pool
     for (let row = 0; row < ROWS; row++) {
       this.boardMeshes.push([]);
@@ -166,8 +176,15 @@ export class Renderer {
   }
 
   render(game: Game): void {
+    // Line-clear animation state
+    const isClearing = game.clearingRows.length > 0;
+    const clearProgress = isClearing ? 1 - game.clearTimer / CLEAR_DURATION : 0;
+    const clearingSet = isClearing ? new Set(game.clearingRows) : null;
+
     // Update board meshes
     for (let row = 0; row < ROWS; row++) {
+      const animating = clearingSet?.has(row) ?? false;
+
       for (let col = 0; col < COLS; col++) {
         const cell = game.grid[row][col];
         const existing = this.boardMeshes[row][col];
@@ -183,8 +200,24 @@ export class Renderer {
             mesh.position.set(col * CELL_SIZE, (ROWS - 1 - row) * CELL_SIZE, 0);
             this.scene.add(mesh);
             this.boardMeshes[row][col] = mesh;
-          } else {
+          } else if (!animating) {
+            // Normal cell — restore material and scale in case it was previously animated
             existing.material = this.materials[cell];
+            existing.scale.set(1, 1, 1);
+          }
+
+          // Apply clear animation to full rows
+          if (animating && existing) {
+            if (clearProgress < 0.4) {
+              // Flash phase: swap to white
+              existing.material = this.clearMaterial;
+              existing.scale.set(1, 1, 1);
+            } else {
+              // Collapse phase: shrink Y toward 0
+              const t = (clearProgress - 0.4) / 0.6;
+              existing.material = this.clearMaterial;
+              existing.scale.set(1, 1 - t, 1);
+            }
           }
         }
       }
