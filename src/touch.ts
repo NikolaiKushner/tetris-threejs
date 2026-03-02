@@ -1,5 +1,6 @@
 import { Game } from './game';
 import { DAS_DELAY, DAS_RATE } from './constants';
+import { settingsManager } from './settings';
 
 type Direction = 'left' | 'right';
 
@@ -31,11 +32,15 @@ export class TouchHandler {
 
     this.dasTimer += dt;
 
-    if (!this.dasActive && this.dasTimer >= DAS_DELAY) {
+    // Read DAS settings dynamically (fallback to constants)
+    const dasDelay = settingsManager.settings.dasDelay ?? DAS_DELAY;
+    const dasRate = settingsManager.settings.dasRate ?? DAS_RATE;
+
+    if (!this.dasActive && this.dasTimer >= dasDelay) {
       this.dasActive = true;
       this.dasTimer = 0;
       this.doMove(this.heldDir);
-    } else if (this.dasActive && this.dasTimer >= DAS_RATE) {
+    } else if (this.dasActive && this.dasTimer >= dasRate) {
       this.dasTimer = 0;
       this.doMove(this.heldDir);
     }
@@ -82,6 +87,10 @@ export class TouchHandler {
       } else {
         this.game.hardDrop();
       }
+    });
+
+    this.bindButton('btn-hold', () => {
+      this.game.hold();
     });
 
     // Pause button

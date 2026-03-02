@@ -1,10 +1,10 @@
 import { LINE_SCORES, LINES_PER_LEVEL, LOCK_DELAY, SOFT_DROP_FACTOR, SPEED_TABLE } from './constants';
 import { createGrid, isValidPosition, lockPiece, clearLines, findFullRows, getGhostY } from './board';
 import type { Grid } from './board';
-
-export const CLEAR_DURATION = 500; // ms for line-clear animation
 import { getKicks, getSpawnX, getSpawnY } from './tetromino';
 import type { PieceType } from './tetromino';
+
+export const CLEAR_DURATION = 500; // ms for line-clear animation
 
 export type GameState = 'idle' | 'playing' | 'paused' | 'gameover';
 
@@ -20,6 +20,8 @@ export class Game {
   state: GameState = 'idle';
   piece: ActivePiece | null = null;
   nextPiece: PieceType = 1;
+  holdPiece: PieceType | null = null;
+  canHold = true;
   score = 0;
   level = 1;
   lines = 0;
@@ -35,8 +37,9 @@ export class Game {
   onMove: (() => void) | null = null;
   onRotate: (() => void) | null = null;
   onLock: (() => void) | null = null;
+  onHold: (() => void) | null = null;
   onHardDrop: (() => void) | null = null;
-  onLineClear: ((count: number) => void) | null = null;
+  onLineClear: ((count: number, score: number) => void) | null = null;
   onLevelUp: (() => void) | null = null;
   onGameOver: (() => void) | null = null;
 
@@ -56,6 +59,8 @@ export class Game {
     this.isLocking = false;
     this.clearingRows = [];
     this.clearTimer = 0;
+    this.holdPiece = null;
+    this.canHold = true;
     this.bag = [];
     this.nextPiece = this.drawFromBag();
     this.startTime = Date.now();
@@ -98,7 +103,6 @@ export class Game {
     if (this.dropTimer >= dropInterval) {
       this.dropTimer = 0;
       if (!this.moveDown()) {
-        // Piece can't move down
         if (!this.isLocking) {
           this.isLocking = true;
           this.lockTimer = 0;
@@ -109,7 +113,6 @@ export class Game {
     // Lock delay
     if (this.isLocking) {
       this.lockTimer += dt;
-      // If piece can move down again (e.g., line cleared beneath), cancel lock
       if (this.piece && isValidPosition(this.grid, this.piece.type, this.piece.rotation, this.piece.x, this.piece.y + 1)) {
         this.isLocking = false;
         this.lockTimer = 0;
@@ -167,6 +170,28 @@ export class Game {
     return rotated;
   }
 
+  hold(): void {
+    if (!this.piece || !this.canHold || this.state !== 'playing') return;
+
+    const currentType = this.piece.type;
+    const prevHeld = this.holdPiece;
+
+    this.holdPiece = currentType;
+    this.piece = null;
+    this.isLocking = false;
+    this.lockTimer = 0;
+    this.onHold?.();
+
+    if (prevHeld === null) {
+      // No piece was held: draw next from bag (spawnPiece resets canHold=true, we override)
+      this.spawnPiece();
+      this.canHold = false;
+    } else {
+      this.canHold = false;
+      this.spawnFromType(prevHeld);
+    }
+  }
+
   getGhostY(): number {
     if (!this.piece) return 0;
     return getGhostY(this.grid, this.piece.type, this.piece.rotation, this.piece.x, this.piece.y);
@@ -179,7 +204,6 @@ export class Game {
     if (isValidPosition(this.grid, this.piece.type, this.piece.rotation, newX, newY)) {
       this.piece.x = newX;
       this.piece.y = newY;
-      // Reset lock timer on successful move
       if (this.isLocking && dy === 0) {
         this.lockTimer = 0;
       }
@@ -196,7 +220,7 @@ export class Game {
 
     for (const [kx, ky] of kicks) {
       const newX = this.piece.x + kx;
-      const newY = this.piece.y - ky; // SRS kick y is inverted relative to our grid
+      const newY = this.piece.y - ky;
       if (isValidPosition(this.grid, this.piece.type, toRot, newX, newY)) {
         this.piece.rotation = toRot;
         this.piece.x = newX;
@@ -214,21 +238,27 @@ export class Game {
     this.onLock?.();
     this.isLocking = false;
     this.lockTimer = 0;
-    this.piece = null; // Clear before animation so renderer won't show it
+    this.piece = null;
 
     const rows = findFullRows(this.grid);
     if (rows.length > 0) {
       this.clearingRows = rows;
       this.clearTimer = CLEAR_DURATION;
-      this.onLineClear?.(rows.length);
+      const scoreGained = LINE_SCORES[rows.length] * this.level;
+      this.onLineClear?.(rows.length, scoreGained);
     } else {
       this.spawnPiece();
     }
   }
 
   private spawnPiece(): void {
+    this.canHold = true; // Reset hold ability when a new piece comes from the bag
     const type = this.nextPiece;
     this.nextPiece = this.drawFromBag();
+    this.spawnFromType(type);
+  }
+
+  private spawnFromType(type: PieceType): void {
     const x = getSpawnX(type);
     const y = getSpawnY(type);
 
@@ -241,12 +271,13 @@ export class Game {
 
     this.piece = { type, rotation: 0, x, y };
     this.dropTimer = 0;
+    this.isLocking = false;
+    this.lockTimer = 0;
   }
 
   private drawFromBag(): PieceType {
     if (this.bag.length === 0) {
       this.bag = [1, 2, 3, 4, 5, 6, 7] as PieceType[];
-      // Fisher-Yates shuffle
       for (let i = this.bag.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
         [this.bag[i], this.bag[j]] = [this.bag[j], this.bag[i]];

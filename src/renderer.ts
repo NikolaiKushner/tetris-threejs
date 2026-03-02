@@ -2,10 +2,20 @@ import * as THREE from 'three';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
-import { COLS, ROWS, PIECE_COLORS } from './constants';
+import {
+  COLS,
+  ROWS,
+  PIECE_COLORS,
+  THEME_BACKGROUNDS,
+  THEME_GRID_COLORS,
+  THEME_BORDER_COLORS,
+  getColorsForTheme,
+  type Theme,
+} from './constants';
 import { Game, CLEAR_DURATION } from './game';
 import { getShape } from './tetromino';
 import type { PieceType } from './tetromino';
+import { settingsManager } from './settings';
 
 const CELL_SIZE = 1;
 const GAP = 0.04;
@@ -16,19 +26,35 @@ export class Renderer {
   private camera: THREE.OrthographicCamera;
   private renderer: THREE.WebGLRenderer;
   private composer: EffectComposer;
+  private bloomPass: UnrealBloomPass;
+  private renderPass: RenderPass;
 
   // Mesh pools
   private boardMeshes: (THREE.Mesh | null)[][] = [];
   private pieceMeshes: THREE.Mesh[] = [];
   private ghostMeshes: THREE.Mesh[] = [];
   private gridLines: THREE.LineSegments;
+  private bgMesh: THREE.Mesh;
+  private borderLine: THREE.LineSegments;
 
   // Materials cache (one per piece type)
   private materials: THREE.MeshStandardMaterial[] = [];
   private ghostMaterials: THREE.MeshStandardMaterial[] = [];
   private clearMaterial: THREE.MeshStandardMaterial;
 
+  // Current theme
+  private currentTheme: Theme = 'neon';
+  private currentColors: number[] = PIECE_COLORS;
+
   private blockGeo: THREE.BoxGeometry;
+
+  // Camera base position (center of board)
+  private camCX = 0;
+  private camCY = 0;
+
+  // Screen shake
+  private shakeAmount = 0;
+  private lastRenderMs = 0;
 
   constructor(container: HTMLElement) {
     this.scene = new THREE.Scene();
@@ -46,8 +72,10 @@ export class Renderer {
       viewH / 2, -viewH / 2,
       0.1, 100,
     );
-    this.camera.position.set(boardW / 2 - 0.5, boardH / 2 - 0.5, 20);
-    this.camera.lookAt(boardW / 2 - 0.5, boardH / 2 - 0.5, 0);
+    this.camCX = boardW / 2 - 0.5;
+    this.camCY = boardH / 2 - 0.5;
+    this.camera.position.set(this.camCX, this.camCY, 20);
+    this.camera.lookAt(this.camCX, this.camCY, 0);
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
@@ -65,14 +93,18 @@ export class Renderer {
 
     // Post-processing bloom
     this.composer = new EffectComposer(this.renderer);
-    this.composer.addPass(new RenderPass(this.scene, this.camera));
-    const bloom = new UnrealBloomPass(
+    this.renderPass = new RenderPass(this.scene, this.camera);
+    this.composer.addPass(this.renderPass);
+    this.bloomPass = new UnrealBloomPass(
       new THREE.Vector2(window.innerWidth, window.innerHeight),
       0.8,   // strength
       0.4,   // radius
       0.85,  // threshold
     );
-    this.composer.addPass(bloom);
+    this.composer.addPass(this.bloomPass);
+
+    // Apply initial bloom setting
+    this.setBloomEnabled(settingsManager.settings.bloom);
 
     // Shared geometry
     this.blockGeo = new THREE.BoxGeometry(BLOCK, BLOCK, BLOCK * 0.6);
@@ -130,9 +162,9 @@ export class Renderer {
     // Board background panel
     const bgGeo = new THREE.PlaneGeometry(COLS * CELL_SIZE, ROWS * CELL_SIZE);
     const bgMat = new THREE.MeshBasicMaterial({ color: 0x0d0d2b });
-    const bgMesh = new THREE.Mesh(bgGeo, bgMat);
-    bgMesh.position.set(boardW / 2 - 0.5, boardH / 2 - 0.5, -0.3);
-    this.scene.add(bgMesh);
+    this.bgMesh = new THREE.Mesh(bgGeo, bgMat);
+    this.bgMesh.position.set(boardW / 2 - 0.5, boardH / 2 - 0.5, -0.3);
+    this.scene.add(this.bgMesh);
 
     // Board border (neon frame)
     const borderGeo = new THREE.EdgesGeometry(new THREE.PlaneGeometry(
@@ -140,13 +172,16 @@ export class Renderer {
       ROWS * CELL_SIZE + 0.1,
     ));
     const borderMat = new THREE.LineBasicMaterial({ color: 0x4444aa });
-    const borderLine = new THREE.LineSegments(borderGeo, borderMat);
-    borderLine.position.set(boardW / 2 - 0.5, boardH / 2 - 0.5, -0.2);
-    this.scene.add(borderLine);
+    this.borderLine = new THREE.LineSegments(borderGeo, borderMat);
+    this.borderLine.position.set(boardW / 2 - 0.5, boardH / 2 - 0.5, -0.2);
+    this.scene.add(this.borderLine);
 
     // Grid lines
     this.gridLines = this.createGridLines();
     this.scene.add(this.gridLines);
+
+    // Apply initial theme from settings
+    this.setTheme(settingsManager.settings.theme);
 
     // Handle resize
     window.addEventListener('resize', this.onResize);
@@ -175,7 +210,101 @@ export class Renderer {
     return new THREE.LineSegments(geo, mat);
   }
 
+  triggerShake(intensity: number): void {
+    // Check settings before applying shake
+    if (!settingsManager.settings.screenShake) return;
+    this.shakeAmount = Math.max(this.shakeAmount, intensity);
+  }
+
+  setBloomEnabled(enabled: boolean): void {
+    this.bloomPass.enabled = enabled;
+    settingsManager.update({ bloom: enabled });
+  }
+
+  setScreenShakeEnabled(enabled: boolean): void {
+    settingsManager.update({ screenShake: enabled });
+    if (!enabled) {
+      this.shakeAmount = 0;
+      this.camera.position.set(this.camCX, this.camCY, 20);
+    }
+  }
+
+  setTheme(theme: Theme): void {
+    this.currentTheme = theme;
+    this.currentColors = getColorsForTheme(theme);
+    settingsManager.update({ theme });
+
+    // Update scene background
+    this.scene.background = new THREE.Color(THEME_BACKGROUNDS[theme]);
+
+    // Update board background (slightly darker than scene for neon, same for gameboy)
+    const bgColor = theme === 'neon' ? 0x0d0d2b : THEME_BACKGROUNDS[theme];
+    (this.bgMesh.material as THREE.MeshBasicMaterial).color.setHex(bgColor);
+
+    // Update grid lines
+    const gridMat = this.gridLines.material as THREE.LineBasicMaterial;
+    gridMat.color.setHex(THEME_GRID_COLORS[theme]);
+
+    // Update border
+    const borderMat = this.borderLine.material as THREE.LineBasicMaterial;
+    borderMat.color.setHex(THEME_BORDER_COLORS[theme]);
+
+    // Determine emissive intensity based on theme
+    const isLight = theme === 'gameboy-light';
+    const emissiveIntensity = isLight ? 0.3 : 0.6;
+    const ghostEmissive = isLight ? 0.1 : 0.2;
+
+    // Update materials for each piece type
+    for (let i = 0; i < this.currentColors.length; i++) {
+      const color = this.currentColors[i];
+      this.materials[i].color.setHex(color);
+      this.materials[i].emissive.setHex(color);
+      this.materials[i].emissiveIntensity = emissiveIntensity;
+
+      this.ghostMaterials[i].color.setHex(color);
+      this.ghostMaterials[i].emissive.setHex(color);
+      this.ghostMaterials[i].emissiveIntensity = ghostEmissive;
+    }
+
+    // Update clear material - white flash for all themes
+    this.clearMaterial.color.setHex(0xffffff);
+    this.clearMaterial.emissive.setHex(0xffffff);
+    this.clearMaterial.emissiveIntensity = isLight ? 0.8 : 1.5;
+
+    // Restore bloom state from settings
+    this.bloomPass.enabled = settingsManager.settings.bloom;
+
+    // Clear all board meshes so they get recreated with new materials
+    for (let row = 0; row < ROWS; row++) {
+      for (let col = 0; col < COLS; col++) {
+        const existing = this.boardMeshes[row][col];
+        if (existing) {
+          this.scene.remove(existing);
+          this.boardMeshes[row][col] = null;
+        }
+      }
+    }
+  }
+
+  getTheme(): Theme {
+    return this.currentTheme;
+  }
+
   render(game: Game): void {
+    // Screen shake — decay exponentially with time
+    const now = performance.now();
+    const dtSec = this.lastRenderMs ? (now - this.lastRenderMs) / 1000 : 0;
+    this.lastRenderMs = now;
+
+    if (this.shakeAmount > 0.001) {
+      const sx = (Math.random() * 2 - 1) * this.shakeAmount;
+      const sy = (Math.random() * 2 - 1) * this.shakeAmount * 0.6;
+      this.camera.position.set(this.camCX + sx, this.camCY + sy, 20);
+      this.shakeAmount *= Math.exp(-9 * dtSec); // ~0.6s total visible duration
+    } else {
+      this.shakeAmount = 0;
+      this.camera.position.set(this.camCX, this.camCY, 20);
+    }
     // Line-clear animation state
     const isClearing = game.clearingRows.length > 0;
     const clearProgress = isClearing ? 1 - game.clearTimer / CLEAR_DURATION : 0;
@@ -296,14 +425,15 @@ export class Renderer {
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    const color = '#' + PIECE_COLORS[pieceType].toString(16).padStart(6, '0');
+    const color = '#' + this.currentColors[pieceType].toString(16).padStart(6, '0');
+    const isGameboy = this.currentTheme.startsWith('gameboy');
 
     for (let row = 0; row < shape.length; row++) {
       for (let col = 0; col < shape[row].length; col++) {
         if (!shape[row][col]) continue;
         ctx.fillStyle = color;
         ctx.shadowColor = color;
-        ctx.shadowBlur = 10;
+        ctx.shadowBlur = isGameboy ? 0 : 10;
         ctx.fillRect(col * cellSize + 2, row * cellSize + 2, cellSize - 4, cellSize - 4);
       }
     }
